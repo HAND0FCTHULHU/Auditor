@@ -86,6 +86,8 @@ auditor in interactive mode.
 
 ## Approval Workflow
 
+> **For a detailed step-by-step walkthrough, see [APPROVAL-GUIDE.md](APPROVAL-GUIDE.md).**
+
 DCSA compliance requires that audit reports are formally reviewed and approved by
 authorized personnel. The approval workflow supports:
 
