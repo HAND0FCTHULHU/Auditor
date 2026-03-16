@@ -260,7 +260,7 @@ function Get-AuditorStatus {
     Write-Host "  Log Path: $($config.LogStorage.BasePath)"
 
     Write-Host "`nRunning Jobs:" -ForegroundColor Yellow
-    foreach ($name in $script:RunningJobs.Keys) {
+    foreach ($name in @($script:RunningJobs.Keys)) {
         $job = $script:RunningJobs[$name]
         $status = switch ($job.State) {
             "Running" { "Running" }

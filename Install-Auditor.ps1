@@ -90,7 +90,8 @@ function Test-Prerequisites {
     Write-Host "    [+] Running with Administrator privileges" -ForegroundColor Green
 
     # Check disk space (minimum 1GB recommended)
-    $drive = (Get-Item $LogPath.Substring(0,2) -ErrorAction SilentlyContinue) ?? (Get-Item "C:")
+    $drive = Get-Item $LogPath.Substring(0,2) -ErrorAction SilentlyContinue
+    if (-not $drive) { $drive = Get-Item "C:" }
     $freeSpace = (Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$($drive.Name)'").FreeSpace
     $freeSpaceGB = [math]::Round($freeSpace / 1GB, 2)
 
@@ -217,7 +218,7 @@ function Initialize-LogDirectory {
     $configPath = "$InstallPath\src\config\AuditConfig.psd1"
     if (Test-Path $configPath) {
         $configContent = Get-Content -Path $configPath -Raw
-        $configContent = $configContent -replace 'BasePath = "C:\\AuditLogs"', "BasePath = `"$($LogPath -replace '\\', '\\')`""
+        $configContent = $configContent -replace 'BasePath = "C:\\AuditLogs"', "BasePath = `"$LogPath`""
         $configContent | Set-Content -Path $configPath -Encoding UTF8
         Write-Host "    [+] Configuration updated with log path" -ForegroundColor Green
     }

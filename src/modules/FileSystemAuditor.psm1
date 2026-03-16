@@ -250,8 +250,8 @@ function Get-FileAccessEvents {
 
             $isMonitored = $false
             foreach ($pathPattern in $config.FileSystem.MonitoredPaths) {
-                $checkPath = $pathPattern -replace '\*', '.*'
-                if ($objectName -match [regex]::Escape($checkPath)) {
+                $checkPath = [regex]::Escape($pathPattern) -replace '\\\*', '.*'
+                if ($objectName -match $checkPath) {
                     $isMonitored = $true
                     break
                 }

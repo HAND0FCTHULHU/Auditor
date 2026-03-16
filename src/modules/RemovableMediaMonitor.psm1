@@ -160,7 +160,7 @@ function Write-DeviceEvent {
     }
 
     # Check if device is authorized
-    $isAuthorized = $true
+    $isAuthorized = $false
     if ($config.RemovableMedia.AuthorizedDevices.Count -gt 0) {
         $isAuthorized = $deviceInfo.DeviceID -in $config.RemovableMedia.AuthorizedDevices -or
                         $deviceInfo.SerialNumber -in $config.RemovableMedia.AuthorizedDevices

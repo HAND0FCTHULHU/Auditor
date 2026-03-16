@@ -15,6 +15,7 @@ Import-Module "$modulePath\utils\AuditUtilities.psm1" -Force
 # Script-level tracking variables
 $script:ActiveSessions = @{}
 $script:LastActivityTime = @{}
+$script:ScreenLockEventCache = @{}
 
 function Start-UserActivityMonitoring {
     <#
@@ -233,8 +234,8 @@ function Check-ScreenLockEvents {
 
             # Only log if not already logged (check cache)
             $cacheKey = "$($event.RecordId)"
-            if (-not $script:LastActivityTime.ContainsKey($cacheKey)) {
-                $script:LastActivityTime[$cacheKey] = $true
+            if (-not $script:ScreenLockEventCache.ContainsKey($cacheKey)) {
+                $script:ScreenLockEventCache[$cacheKey] = $true
 
                 Write-AuditLog -Category "UserActivity" -Message "$eventType - User: $userName" -Severity "Information" -AdditionalData @{
                     EventType = $eventType
