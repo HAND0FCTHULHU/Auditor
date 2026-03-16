@@ -662,7 +662,11 @@ function Get-AuditReportList {
         return @()
     }
 
-    Get-ChildItem -Path $reportPath -File | ForEach-Object {
+    # Filter out approval.json sidecar files and only include actual reports
+    Get-ChildItem -Path $reportPath -File | Where-Object {
+        $_.Extension -in @('.html', '.csv', '.json') -and
+        $_.Name -notmatch '\.approval\.json$'
+    } | ForEach-Object {
         [PSCustomObject]@{
             Name = $_.Name
             Type = if ($_.Name -match "Daily") { "Daily Summary" } elseif ($_.Name -match "Weekly") { "Weekly Compliance" } else { "Other" }
@@ -765,6 +769,26 @@ function Approve-AuditReport {
 
     $config = Get-AuditConfig
 
+    # Validate path is within expected reports directory (security check)
+    $expectedBasePath = $config.Reporting.OutputPath
+    $resolvedReportPath = [System.IO.Path]::GetFullPath($ReportPath)
+    $resolvedBasePath = [System.IO.Path]::GetFullPath($expectedBasePath)
+    if (-not $resolvedReportPath.StartsWith($resolvedBasePath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Report path must be within the configured reports directory: $expectedBasePath"
+    }
+
+    # Sanitize input strings to prevent injection
+    $safeReviewerName = $ReviewerName -replace '[<>&"'']', '' -replace '[\x00-\x1F]', ''
+    $safeComments = $Comments -replace '[<>&"'']', '' -replace '[\x00-\x1F]', ''
+
+    # Validate reviewer name length
+    if ($safeReviewerName.Length -gt 100) {
+        $safeReviewerName = $safeReviewerName.Substring(0, 100)
+    }
+    if ($safeComments.Length -gt 1000) {
+        $safeComments = $safeComments.Substring(0, 1000)
+    }
+
     # Compute hash of the report being approved
     $reportHash = (Get-FileHash -Path $ReportPath -Algorithm SHA256).Hash
 
@@ -772,10 +796,10 @@ function Approve-AuditReport {
         Timestamp    = Get-AuditTimestamp
         ReportFile   = (Split-Path $ReportPath -Leaf)
         ReportHash   = $reportHash
-        ReviewerName = $ReviewerName
+        ReviewerName = $safeReviewerName
         ReviewerRole = $ReviewerRole
         Status       = $Status
-        Comments     = $Comments
+        Comments     = $safeComments
         ComputerName = $env:COMPUTERNAME
         UserAccount  = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     }

@@ -42,7 +42,9 @@ function Initialize-AuditEnvironment {
             "$($script:LogPath)\Process",
             "$($script:LogPath)\Baseline",
             "$($script:LogPath)\Reports",
-            "$($script:LogPath)\Integrity"
+            "$($script:LogPath)\Integrity",
+            "$($script:LogPath)\Approvals",
+            "$($script:LogPath)\Alert"
         )
 
         foreach ($dir in $directories) {
@@ -420,8 +422,32 @@ function Verify-LogIntegrity {
         $LogPath = $config.LogStorage.BasePath
     }
 
+    # Handle case where log path doesn't exist yet
+    if (-not (Test-Path $LogPath)) {
+        return @([PSCustomObject]@{
+            FilePath = $LogPath
+            TotalLines = 0
+            ValidLines = 0
+            InvalidLines = 0
+            TamperedLines = @()
+            IntegrityStatus = "NO_LOGS"
+        })
+    }
+
     $results = @()
     $logFiles = Get-ChildItem -Path $LogPath -Recurse -Filter "*.log" -ErrorAction SilentlyContinue
+
+    # Handle case where no log files exist yet
+    if ($null -eq $logFiles -or $logFiles.Count -eq 0) {
+        return @([PSCustomObject]@{
+            FilePath = $LogPath
+            TotalLines = 0
+            ValidLines = 0
+            InvalidLines = 0
+            TamperedLines = @()
+            IntegrityStatus = "NO_LOGS"
+        })
+    }
 
     foreach ($file in $logFiles) {
         $fileResult = @{
@@ -433,6 +459,13 @@ function Verify-LogIntegrity {
         }
 
         $lines = Get-Content -Path $file.FullName -ErrorAction SilentlyContinue
+
+        # Handle empty log files
+        if ($null -eq $lines -or $lines.Count -eq 0) {
+            $fileResult.IntegrityStatus = "EMPTY"
+            $results += [PSCustomObject]$fileResult
+            continue
+        }
 
         foreach ($line in $lines) {
             $fileResult.TotalLines++
@@ -465,6 +498,110 @@ function Verify-LogIntegrity {
     return $results
 }
 
+function ConvertTo-SafeString {
+    <#
+    .SYNOPSIS
+        Sanitizes input strings to prevent injection attacks in logs and reports
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$InputString,
+
+        [Parameter()]
+        [int]$MaxLength = 500
+    )
+
+    if ([string]::IsNullOrEmpty($InputString)) {
+        return ""
+    }
+
+    # Truncate to max length
+    if ($InputString.Length -gt $MaxLength) {
+        $InputString = $InputString.Substring(0, $MaxLength) + "...[TRUNCATED]"
+    }
+
+    # Remove control characters except newlines and tabs
+    $sanitized = $InputString -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', ''
+
+    # Escape HTML special characters for report output
+    $sanitized = $sanitized -replace '&', '&amp;'
+    $sanitized = $sanitized -replace '<', '&lt;'
+    $sanitized = $sanitized -replace '>', '&gt;'
+    $sanitized = $sanitized -replace '"', '&quot;'
+
+    return $sanitized
+}
+
+function Test-SafePath {
+    <#
+    .SYNOPSIS
+        Validates that a path is safe and within expected boundaries
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter()]
+        [string]$BasePath
+    )
+
+    try {
+        # Resolve the full path
+        $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+
+        # Check for path traversal attempts
+        if ($resolvedPath -match '\.\.') {
+            return $false
+        }
+
+        # If a base path is specified, ensure the resolved path is within it
+        if ($BasePath) {
+            $resolvedBase = [System.IO.Path]::GetFullPath($BasePath)
+            if (-not $resolvedPath.StartsWith($resolvedBase, [StringComparison]::OrdinalIgnoreCase)) {
+                return $false
+            }
+        }
+
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Protect-SensitiveData {
+    <#
+    .SYNOPSIS
+        Redacts sensitive data patterns from strings before logging
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$InputString
+    )
+
+    if ([string]::IsNullOrEmpty($InputString)) {
+        return ""
+    }
+
+    # Redact common sensitive patterns
+    $patterns = @(
+        @{ Pattern = '(?i)(password|pwd|passwd|secret|token|api[_-]?key|private[_-]?key)[=:]\s*\S+'; Replace = '$1=***REDACTED***' },
+        @{ Pattern = '(?i)(bearer|authorization)[:\s]+\S+'; Replace = '$1: ***REDACTED***' },
+        @{ Pattern = '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'; Replace = '***EMAIL***' }
+    )
+
+    $result = $InputString
+    foreach ($p in $patterns) {
+        $result = $result -replace $p.Pattern, $p.Replace
+    }
+
+    return $result
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Initialize-AuditEnvironment',
@@ -477,5 +614,8 @@ Export-ModuleMember -Function @(
     'Test-IsAdministrator',
     'ConvertTo-AuditReport',
     'Invoke-LogRotation',
-    'Verify-LogIntegrity'
+    'Verify-LogIntegrity',
+    'ConvertTo-SafeString',
+    'Test-SafePath',
+    'Protect-SensitiveData'
 )

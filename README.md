@@ -26,9 +26,13 @@ This auditing software is designed for standalone Windows 11 machines accredited
 
 1. Open PowerShell as Administrator
 2. Navigate to the Auditor directory
-3. Run the installer:
+3. Run the pre-flight check to verify system compatibility:
    ```powershell
-   .\Install-Auditor.ps1
+   .\scripts\Test-AuditorSetup.ps1
+   ```
+4. Run the installer:
+   ```powershell
+   .\Install-Auditor.ps1 -RegisterScheduledTask -ConfigureAuditPolicy
    ```
 
 ## Directory Structure
