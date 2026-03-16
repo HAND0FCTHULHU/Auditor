@@ -144,6 +144,14 @@ function Process-SecurityEvent {
 
     # Check for alerting conditions
     Check-SecurityAlerts -EventId $eventId -EventData $eventData
+
+    # Trigger HTML report update on successful logon
+    if ($eventId -eq 4624) {
+        try {
+            Import-Module "$modulePath\modules\ReportGenerator.psm1" -Force -ErrorAction SilentlyContinue
+            Update-ReportOnLogon
+        } catch { }
+    }
 }
 
 function Get-SecurityEventTypeName {

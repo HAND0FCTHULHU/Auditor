@@ -65,10 +65,46 @@ Edit `src/config/AuditConfig.psd1` to customize:
 .\scripts\Generate-ComplianceReport.ps1
 ```
 
+### Approve a Compliance Report
+```powershell
+# Interactive (prompts for report selection)
+.\scripts\Approve-ComplianceReport.ps1 -ReviewerName "Jane Smith" -ReviewerRole ISSM -Status Approved
+
+# Direct path
+.\scripts\Approve-ComplianceReport.ps1 -ReportPath "C:\AuditLogs\Reports\WeeklyCompliance_2026-03-15.html" `
+    -ReviewerName "Jane Smith" -ReviewerRole ISSM -Status Approved `
+    -Comments "All findings reviewed and acceptable."
+```
+
+You can also approve reports from the interactive menu (option 9) after starting the
+auditor in interactive mode.
+
 ### View Current Audit Status
 ```powershell
 .\scripts\Get-AuditStatus.ps1
 ```
+
+## Approval Workflow
+
+DCSA compliance requires that audit reports are formally reviewed and approved by
+authorized personnel. The approval workflow supports:
+
+| Role | Description |
+|------|-------------|
+| **ISSM** | Information System Security Manager — primary reviewer |
+| **FSO** | Facility Security Officer — secondary reviewer when applicable |
+
+**Approval statuses:**
+- `Approved` — report findings are reviewed and accepted
+- `Rejected` — report findings require remediation before acceptance
+- `ConditionallyApproved` — approved with conditions noted in comments
+
+Each approval captures:
+- Reviewer name, role, and Windows account
+- Timestamp in UTC
+- SHA256 hash of the approved report (detects post-approval tampering)
+- A tamper-evident approval log under `C:\AuditLogs\Approvals\`
+- A sidecar `.approval.json` file next to the report for quick status lookup
 
 ## DCSA Compliance Notes
 

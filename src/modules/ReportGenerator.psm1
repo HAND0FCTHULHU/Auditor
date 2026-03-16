@@ -674,6 +674,164 @@ function Get-AuditReportList {
     } | Sort-Object Created -Descending
 }
 
+function Update-ReportOnLogon {
+    <#
+    .SYNOPSIS
+        Regenerates the daily HTML report when a user logon is detected
+
+    .DESCRIPTION
+        Called by the SecurityEventCollector when a successful logon event (4624)
+        is processed. Regenerates the current day's daily summary report so the
+        HTML dashboard reflects the latest audit data.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $config = Get-AuditConfig
+    $reportPath = $config.Reporting.OutputPath
+    $dateStr = (Get-Date).ToString("yyyy-MM-dd")
+    $htmlFile = "$reportPath\DailySummary_$dateStr.html"
+
+    # Throttle: only regenerate if the existing report is older than 60 seconds
+    if (Test-Path $htmlFile) {
+        $lastWrite = (Get-Item $htmlFile).LastWriteTime
+        if (((Get-Date) - $lastWrite).TotalSeconds -lt 60) {
+            return
+        }
+    }
+
+    try {
+        New-DailySummaryReport -Date (Get-Date).Date -Formats @("HTML") | Out-Null
+        Write-AuditLog -Category "System" -Message "Daily HTML report updated on logon trigger" -Severity "Information"
+    } catch {
+        Write-AuditLog -Category "System" -Message "Failed to update report on logon trigger: $_" -Severity "Warning"
+    }
+}
+
+function Approve-AuditReport {
+    <#
+    .SYNOPSIS
+        Records an ISSM or FSO approval on a compliance report
+
+    .DESCRIPTION
+        Creates a tamper-evident approval record for the specified audit report.
+        The approval includes reviewer identity, role, timestamp, status, and
+        an optional comment. A SHA256 hash of the original report is captured
+        to ensure the approved content has not been modified after signing.
+
+    .PARAMETER ReportPath
+        Full path to the report file being approved.
+
+    .PARAMETER ReviewerName
+        Name of the person approving the report.
+
+    .PARAMETER ReviewerRole
+        Role of the reviewer. Must be ISSM or FSO.
+
+    .PARAMETER Status
+        Approval decision: Approved, Rejected, or ConditionallyApproved.
+
+    .PARAMETER Comments
+        Optional comments or conditions attached to the approval.
+
+    .EXAMPLE
+        Approve-AuditReport -ReportPath "C:\AuditLogs\Reports\WeeklyCompliance_2026-03-15.html" `
+            -ReviewerName "Jane Smith" -ReviewerRole ISSM -Status Approved `
+            -Comments "All findings reviewed and acceptable."
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ReportPath,
+
+        [Parameter(Mandatory)]
+        [string]$ReviewerName,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("ISSM", "FSO")]
+        [string]$ReviewerRole,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("Approved", "Rejected", "ConditionallyApproved")]
+        [string]$Status,
+
+        [Parameter()]
+        [string]$Comments = ""
+    )
+
+    if (-not (Test-Path $ReportPath)) {
+        throw "Report file not found: $ReportPath"
+    }
+
+    $config = Get-AuditConfig
+
+    # Compute hash of the report being approved
+    $reportHash = (Get-FileHash -Path $ReportPath -Algorithm SHA256).Hash
+
+    $approval = [ordered]@{
+        Timestamp    = Get-AuditTimestamp
+        ReportFile   = (Split-Path $ReportPath -Leaf)
+        ReportHash   = $reportHash
+        ReviewerName = $ReviewerName
+        ReviewerRole = $ReviewerRole
+        Status       = $Status
+        Comments     = $Comments
+        ComputerName = $env:COMPUTERNAME
+        UserAccount  = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    }
+
+    # Serialize and hash the approval record itself for integrity
+    $jsonApproval = $approval | ConvertTo-Json -Compress
+    $approvalHash = Get-StringHash -InputString $jsonApproval -Algorithm $config.LogStorage.HashAlgorithm
+    $approvalLine = "$jsonApproval|HASH:$approvalHash"
+
+    # Write the approval record to a dedicated approval log
+    $approvalDir = "$($config.LogStorage.BasePath)\Approvals"
+    if (-not (Test-Path $approvalDir)) {
+        New-Item -Path $approvalDir -ItemType Directory -Force | Out-Null
+    }
+
+    $dateStr = (Get-Date).ToString("yyyy-MM-dd")
+    $approvalLogFile = "$approvalDir\Approvals-$dateStr.log"
+    Add-Content -Path $approvalLogFile -Value $approvalLine -Encoding UTF8
+
+    # Also write a sidecar approval file next to the report
+    $sidecarPath = [System.IO.Path]::ChangeExtension($ReportPath, "approval.json")
+    $approval | ConvertTo-Json -Depth 5 | Out-File -FilePath $sidecarPath -Encoding UTF8
+
+    # Log the approval action
+    Write-AuditLog -Category "System" -Message "Report approved by $ReviewerName ($ReviewerRole): $Status - $(Split-Path $ReportPath -Leaf)" -Severity "Information"
+
+    return [PSCustomObject]$approval
+}
+
+function Get-ReportApprovalStatus {
+    <#
+    .SYNOPSIS
+        Retrieves the approval status for a specific report
+
+    .PARAMETER ReportPath
+        Full path to the report file to check.
+
+    .EXAMPLE
+        Get-ReportApprovalStatus -ReportPath "C:\AuditLogs\Reports\WeeklyCompliance_2026-03-15.html"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ReportPath
+    )
+
+    $sidecarPath = [System.IO.Path]::ChangeExtension($ReportPath, "approval.json")
+
+    if (Test-Path $sidecarPath) {
+        $approval = Get-Content -Path $sidecarPath -Raw | ConvertFrom-Json
+        return $approval
+    }
+
+    return $null
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'New-DailySummaryReport',
@@ -681,5 +839,8 @@ Export-ModuleMember -Function @(
     'New-HtmlReport',
     'New-ComplianceHtmlReport',
     'New-CsvReport',
-    'Get-AuditReportList'
+    'Get-AuditReportList',
+    'Update-ReportOnLogon',
+    'Approve-AuditReport',
+    'Get-ReportApprovalStatus'
 )
