@@ -292,7 +292,8 @@ function Show-InteractiveMenu {
         Write-Host "6. View Current Devices"
         Write-Host "7. View Running Processes"
         Write-Host "8. Create New Baseline"
-        Write-Host "9. Exit"
+        Write-Host "9. Approve Compliance Report"
+        Write-Host "10. Exit"
         Write-Host ""
 
         $choice = Read-Host "Select option"
@@ -341,6 +342,61 @@ function Show-InteractiveMenu {
                 }
             }
             "9" {
+                Write-Host "`nAvailable reports:" -ForegroundColor Yellow
+                $reports = Get-AuditReportList
+                if ($reports.Count -eq 0) {
+                    Write-Host "No reports found." -ForegroundColor Red
+                } else {
+                    $index = 1
+                    foreach ($r in $reports) {
+                        $approvalStatus = Get-ReportApprovalStatus -ReportPath $r.Path
+                        $approvalTag = if ($approvalStatus) { " [$($approvalStatus.Status)]" } else { " [Not Approved]" }
+                        Write-Host "  $index. $($r.Name)$approvalTag" -ForegroundColor Cyan
+                        $index++
+                    }
+
+                    $selection = Read-Host "`nSelect report number to approve"
+                    $selectedIndex = [int]$selection - 1
+                    if ($selectedIndex -ge 0 -and $selectedIndex -lt $reports.Count) {
+                        $selectedReport = $reports[$selectedIndex]
+                        $reviewerName = Read-Host "Reviewer name"
+
+                        $reviewerRole = ""
+                        while ($reviewerRole -notin @("ISSM", "FSO")) {
+                            $reviewerRole = Read-Host "Role (ISSM or FSO)"
+                            if ($reviewerRole -notin @("ISSM", "FSO")) {
+                                Write-Host "Invalid role. Please enter ISSM or FSO." -ForegroundColor Red
+                            }
+                        }
+
+                        $statusChoice = ""
+                        $validStatuses = @("Approved", "Rejected", "ConditionallyApproved")
+                        while ($statusChoice -notin $validStatuses) {
+                            $statusChoice = Read-Host "Status (Approved, Rejected, or ConditionallyApproved)"
+                            if ($statusChoice -notin $validStatuses) {
+                                Write-Host "Invalid status. Please enter Approved, Rejected, or ConditionallyApproved." -ForegroundColor Red
+                            }
+                        }
+
+                        $comments = Read-Host "Comments (optional)"
+
+                        try {
+                            $result = Approve-AuditReport -ReportPath $selectedReport.Path `
+                                -ReviewerName $reviewerName -ReviewerRole $reviewerRole `
+                                -Status $statusChoice -Comments $comments
+                            Write-Host "`nReport approved successfully." -ForegroundColor Green
+                            Write-Host "  Reviewer: $($result.ReviewerName) ($($result.ReviewerRole))" -ForegroundColor Cyan
+                            Write-Host "  Status: $($result.Status)" -ForegroundColor Cyan
+                            Write-Host "  Timestamp: $($result.Timestamp)" -ForegroundColor Cyan
+                        } catch {
+                            Write-Host "Error approving report: $_" -ForegroundColor Red
+                        }
+                    } else {
+                        Write-Host "Invalid selection." -ForegroundColor Red
+                    }
+                }
+            }
+            "10" {
                 Write-Host "Exiting..." -ForegroundColor Yellow
                 return
             }
