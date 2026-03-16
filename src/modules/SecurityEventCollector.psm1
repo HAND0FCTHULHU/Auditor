@@ -150,7 +150,9 @@ function Process-SecurityEvent {
         try {
             Import-Module "$modulePath\modules\ReportGenerator.psm1" -Force -ErrorAction SilentlyContinue
             Update-ReportOnLogon
-        } catch { }
+        } catch {
+            # Best-effort: report update must not interrupt security event processing
+        }
     }
 }
 

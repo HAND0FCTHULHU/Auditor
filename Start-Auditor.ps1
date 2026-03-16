@@ -360,8 +360,24 @@ function Show-InteractiveMenu {
                     if ($selectedIndex -ge 0 -and $selectedIndex -lt $reports.Count) {
                         $selectedReport = $reports[$selectedIndex]
                         $reviewerName = Read-Host "Reviewer name"
-                        $reviewerRole = Read-Host "Role (ISSM or FSO)"
-                        $statusChoice = Read-Host "Status (Approved, Rejected, or ConditionallyApproved)"
+
+                        $reviewerRole = ""
+                        while ($reviewerRole -notin @("ISSM", "FSO")) {
+                            $reviewerRole = Read-Host "Role (ISSM or FSO)"
+                            if ($reviewerRole -notin @("ISSM", "FSO")) {
+                                Write-Host "Invalid role. Please enter ISSM or FSO." -ForegroundColor Red
+                            }
+                        }
+
+                        $statusChoice = ""
+                        $validStatuses = @("Approved", "Rejected", "ConditionallyApproved")
+                        while ($statusChoice -notin $validStatuses) {
+                            $statusChoice = Read-Host "Status (Approved, Rejected, or ConditionallyApproved)"
+                            if ($statusChoice -notin $validStatuses) {
+                                Write-Host "Invalid status. Please enter Approved, Rejected, or ConditionallyApproved." -ForegroundColor Red
+                            }
+                        }
+
                         $comments = Read-Host "Comments (optional)"
 
                         try {
