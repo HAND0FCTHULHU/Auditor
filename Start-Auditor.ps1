@@ -274,10 +274,18 @@ function Get-AuditorStatus {
 
     Write-Host "`nLog Integrity:" -ForegroundColor Yellow
     $integrity = Verify-LogIntegrity
+    $noLogs = ($integrity | Where-Object { $_.IntegrityStatus -in @("NO_LOGS", "EMPTY") }).Count
     $valid = ($integrity | Where-Object { $_.IntegrityStatus -eq "VALID" }).Count
+    $compromised = ($integrity | Where-Object { $_.IntegrityStatus -eq "COMPROMISED" }).Count
     $total = $integrity.Count
-    $color = if ($valid -eq $total) { "Green" } else { "Red" }
-    Write-Host "  Valid: $valid / $total" -ForegroundColor $color
+
+    if ($noLogs -eq $total) {
+        Write-Host "  Status: No logs yet (first run)" -ForegroundColor Cyan
+    } elseif ($compromised -eq 0) {
+        Write-Host "  Valid: $valid / $($total - $noLogs)" -ForegroundColor Green
+    } else {
+        Write-Host "  Valid: $valid / $($total - $noLogs) - $compromised COMPROMISED" -ForegroundColor Red
+    }
 }
 
 # Interactive menu

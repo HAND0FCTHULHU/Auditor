@@ -59,14 +59,18 @@ if (Test-Path $config.LogStorage.BasePath) {
 Write-Host "`n--- Log Integrity ---" -ForegroundColor Yellow
 try {
     $integrityResults = Verify-LogIntegrity
+    $noLogs = ($integrityResults | Where-Object { $_.IntegrityStatus -in @("NO_LOGS", "EMPTY") }).Count
     $validCount = ($integrityResults | Where-Object { $_.IntegrityStatus -eq "VALID" }).Count
+    $compromisedCount = ($integrityResults | Where-Object { $_.IntegrityStatus -eq "COMPROMISED" }).Count
     $totalCount = $integrityResults.Count
 
-    if ($validCount -eq $totalCount) {
-        Write-Host "Status: ALL LOGS VALID ($validCount/$totalCount)" -ForegroundColor Green
+    if ($noLogs -eq $totalCount) {
+        Write-Host "Status: No audit logs yet (first run or logs pending)" -ForegroundColor Cyan
+    } elseif ($compromisedCount -eq 0) {
+        Write-Host "Status: ALL LOGS VALID ($validCount/$($totalCount - $noLogs))" -ForegroundColor Green
     } else {
         Write-Host "Status: INTEGRITY ISSUES DETECTED" -ForegroundColor Red
-        Write-Host "Valid: $validCount / $totalCount" -ForegroundColor Yellow
+        Write-Host "Valid: $validCount / $($totalCount - $noLogs)" -ForegroundColor Yellow
 
         $compromised = $integrityResults | Where-Object { $_.IntegrityStatus -eq "COMPROMISED" }
         foreach ($file in $compromised) {

@@ -33,40 +33,65 @@ Write-Host "`nVerifying log files..." -ForegroundColor Yellow
 
 $results = Verify-LogIntegrity -Detailed:$Detailed
 
+$noLogsCount = ($results | Where-Object { $_.IntegrityStatus -in @("NO_LOGS", "EMPTY") }).Count
 $validCount = ($results | Where-Object { $_.IntegrityStatus -eq "VALID" }).Count
 $compromisedCount = ($results | Where-Object { $_.IntegrityStatus -eq "COMPROMISED" }).Count
 $totalCount = $results.Count
+$actualLogCount = $totalCount - $noLogsCount
 
 Write-Host "`n--- Results ---" -ForegroundColor Yellow
-Write-Host "Total Log Files: $totalCount"
-Write-Host "Valid Files: $validCount" -ForegroundColor Green
-if ($compromisedCount -gt 0) {
-    Write-Host "Compromised Files: $compromisedCount" -ForegroundColor Red
+
+if ($noLogsCount -eq $totalCount) {
+    Write-Host "Status: No audit logs found yet" -ForegroundColor Cyan
+    Write-Host "This is normal on first run. Logs will be created as events occur." -ForegroundColor Gray
 } else {
-    Write-Host "Compromised Files: $compromisedCount" -ForegroundColor Green
-}
+    Write-Host "Total Log Files: $actualLogCount"
+    Write-Host "Valid Files: $validCount" -ForegroundColor Green
+    if ($compromisedCount -gt 0) {
+        Write-Host "Compromised Files: $compromisedCount" -ForegroundColor Red
+    } else {
+        Write-Host "Compromised Files: $compromisedCount" -ForegroundColor Green
+    }
+    if ($noLogsCount -gt 0) {
+        Write-Host "Empty/Pending: $noLogsCount" -ForegroundColor Gray
+    }
 
-Write-Host "`n--- File Details ---" -ForegroundColor Yellow
-foreach ($result in $results) {
-    $statusColor = if ($result.IntegrityStatus -eq "VALID") { "Green" } else { "Red" }
-    $fileName = Split-Path $result.FilePath -Leaf
+    Write-Host "`n--- File Details ---" -ForegroundColor Yellow
+    foreach ($result in $results) {
+        # Skip NO_LOGS placeholder entries
+        if ($result.IntegrityStatus -in @("NO_LOGS")) { continue }
 
-    Write-Host "[$($result.IntegrityStatus)] $fileName" -ForegroundColor $statusColor
-    Write-Host "    Total Lines: $($result.TotalLines) | Valid: $($result.ValidLines) | Invalid: $($result.InvalidLines)"
-
-    if ($Detailed -and $result.TamperedLines.Count -gt 0) {
-        Write-Host "    Tampered Lines:" -ForegroundColor Red
-        foreach ($line in $result.TamperedLines | Select-Object -First 5) {
-            Write-Host "      Line $($line.LineNumber): $($line.Content.Substring(0, [Math]::Min(80, $line.Content.Length)))..." -ForegroundColor Red
+        $statusColor = switch ($result.IntegrityStatus) {
+            "VALID" { "Green" }
+            "EMPTY" { "Gray" }
+            "COMPROMISED" { "Red" }
+            default { "Yellow" }
         }
-        if ($result.TamperedLines.Count -gt 5) {
-            Write-Host "      ... and $($result.TamperedLines.Count - 5) more" -ForegroundColor Red
+        $fileName = Split-Path $result.FilePath -Leaf
+
+        Write-Host "[$($result.IntegrityStatus)] $fileName" -ForegroundColor $statusColor
+
+        if ($result.IntegrityStatus -notin @("EMPTY", "NO_LOGS")) {
+            Write-Host "    Total Lines: $($result.TotalLines) | Valid: $($result.ValidLines) | Invalid: $($result.InvalidLines)"
+        }
+
+        if ($Detailed -and $result.TamperedLines.Count -gt 0) {
+            Write-Host "    Tampered Lines:" -ForegroundColor Red
+            foreach ($line in $result.TamperedLines | Select-Object -First 5) {
+                $content = if ($line.Content.Length -gt 80) { $line.Content.Substring(0, 80) + "..." } else { $line.Content }
+                Write-Host "      Line $($line.LineNumber): $content" -ForegroundColor Red
+            }
+            if ($result.TamperedLines.Count -gt 5) {
+                Write-Host "      ... and $($result.TamperedLines.Count - 5) more" -ForegroundColor Red
+            }
         }
     }
 }
 
 Write-Host "`n--- Summary ---" -ForegroundColor Yellow
-if ($compromisedCount -eq 0) {
+if ($noLogsCount -eq $totalCount) {
+    Write-Host "RESULT: NO LOGS TO VERIFY (first run)" -ForegroundColor Cyan
+} elseif ($compromisedCount -eq 0) {
     Write-Host "RESULT: ALL LOGS VERIFIED - NO TAMPERING DETECTED" -ForegroundColor Green
 } else {
     Write-Host "RESULT: LOG TAMPERING DETECTED - INVESTIGATION REQUIRED" -ForegroundColor Red
