@@ -136,7 +136,10 @@ function Write-DeviceEvent {
 
     if ($Device) {
         $deviceInfo["DeviceID"] = $Device.DeviceID
-        $deviceInfo["Name"] = $Device.Name ?? $Device.Caption ?? "Unknown Device"
+        $deviceName = $Device.Name
+        if (-not $deviceName) { $deviceName = $Device.Caption }
+        if (-not $deviceName) { $deviceName = "Unknown Device" }
+        $deviceInfo["Name"] = $deviceName
         $deviceInfo["Description"] = $Device.Description
         $deviceInfo["Manufacturer"] = $Device.Manufacturer
         $deviceInfo["PNPDeviceID"] = $Device.PNPDeviceID

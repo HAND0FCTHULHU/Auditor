@@ -203,7 +203,9 @@ function Get-SecurityEventTypeName {
         4912 = "Per-User Audit Policy Changed"
     }
 
-    return $eventTypes[$EventId] ?? "Unknown Event ($EventId)"
+    $result = $eventTypes[$EventId]
+    if ($null -eq $result) { $result = "Unknown Event ($EventId)" }
+    return $result
 }
 
 function Get-SecurityEventSeverity {

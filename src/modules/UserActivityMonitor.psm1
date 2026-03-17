@@ -376,7 +376,9 @@ function Get-LogonTypeName {
         "11" = "CachedInteractive"
     }
 
-    return $types[$LogonType] ?? "Unknown ($LogonType)"
+    $result = $types[$LogonType]
+    if ($null -eq $result) { $result = "Unknown ($LogonType)" }
+    return $result
 }
 
 function Get-UserActivitySummary {

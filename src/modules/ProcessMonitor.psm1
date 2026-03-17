@@ -228,9 +228,9 @@ function Get-ProcessEventsFromLog {
 
             # Create a pseudo-process object
             $processInfo = @{
-                ProcessId = $eventData.NewProcessId ?? $eventData.ProcessId
-                Name = [System.IO.Path]::GetFileName($eventData.NewProcessName ?? $eventData.ProcessName)
-                ExecutablePath = $eventData.NewProcessName ?? $eventData.ProcessName
+                ProcessId = if ($eventData.NewProcessId) { $eventData.NewProcessId } else { $eventData.ProcessId }
+                Name = [System.IO.Path]::GetFileName($(if ($eventData.NewProcessName) { $eventData.NewProcessName } else { $eventData.ProcessName }))
+                ExecutablePath = if ($eventData.NewProcessName) { $eventData.NewProcessName } else { $eventData.ProcessName }
                 ParentProcessId = $eventData.ParentProcessId
                 CommandLine = $eventData.CommandLine
             }
