@@ -187,7 +187,7 @@ function Get-BaselineLocalUsers {
             Enabled = $_.Enabled
             Description = $_.Description
             PasswordRequired = $_.PasswordRequired
-            PasswordChangeableDate = $_.PasswordChangeableDate?.ToString("o")
+            PasswordChangeableDate = if ($_.PasswordChangeableDate) { $_.PasswordChangeableDate.ToString("o") } else { $null }
             SID = $_.SID.Value
         }
     }
@@ -269,8 +269,8 @@ function Get-BaselineScheduledTasks {
             State = $_.State.ToString()
             Author = $_.Author
             Description = $_.Description
-            LastRunTime = $taskInfo.LastRunTime?.ToString("o")
-            NextRunTime = $taskInfo.NextRunTime?.ToString("o")
+            LastRunTime = if ($taskInfo.LastRunTime) { $taskInfo.LastRunTime.ToString("o") } else { $null }
+            NextRunTime = if ($taskInfo.NextRunTime) { $taskInfo.NextRunTime.ToString("o") } else { $null }
             Actions = @($_.Actions | ForEach-Object { $_.Execute })
         }
     }
