@@ -41,9 +41,15 @@ function Start-RemovableMediaMonitoring {
         $script:KnownDevices[$_.DeviceID] = $_
     }
 
+    # Get poll interval from config (default 30 seconds)
+    $pollInterval = 30
+    if ($config.RemovableMedia.PollIntervalSeconds) {
+        $pollInterval = $config.RemovableMedia.PollIntervalSeconds
+    }
+
     if ($AsJob) {
         $job = Start-Job -ScriptBlock {
-            param($ModulePath, $Config)
+            param($ModulePath, $Config, $PollInterval)
             Import-Module "$ModulePath\utils\AuditUtilities.psm1" -Force
             Import-Module "$ModulePath\modules\RemovableMediaMonitor.psm1" -Force
 
@@ -52,9 +58,9 @@ function Start-RemovableMediaMonitoring {
             while ($true) {
                 # Poll for device changes as backup to WMI events
                 Check-DeviceChanges
-                Start-Sleep -Seconds 10
+                Start-Sleep -Seconds $PollInterval
             }
-        } -ArgumentList $modulePath, $config
+        } -ArgumentList $modulePath, $config, $pollInterval
 
         return $job
     } else {
@@ -62,7 +68,7 @@ function Start-RemovableMediaMonitoring {
 
         while ($true) {
             Check-DeviceChanges
-            Start-Sleep -Seconds 10
+            Start-Sleep -Seconds $pollInterval
         }
     }
 }
@@ -70,39 +76,35 @@ function Start-RemovableMediaMonitoring {
 function Register-DeviceEvents {
     <#
     .SYNOPSIS
-        Registers WMI event subscriptions for device changes
+        Registers WMI event subscriptions for USB STORAGE device changes only
+        Note: Only monitors actual storage devices, not all USB devices
     #>
     [CmdletBinding()]
     param()
 
     try {
-        # USB device insertion
-        $insertQuery = "SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_USBHub'"
-        $insertAction = {
-            $device = $Event.SourceEventArgs.NewEvent.TargetInstance
-            Write-DeviceEvent -EventType "Connected" -Device $device
-        }
-        $script:DeviceEventSubscriptions += Register-WmiEvent -Query $insertQuery -Action $insertAction -ErrorAction Stop
-
-        # USB device removal
-        $removeQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_USBHub'"
-        $removeAction = {
-            $device = $Event.SourceEventArgs.NewEvent.TargetInstance
-            Write-DeviceEvent -EventType "Disconnected" -Device $device
-        }
-        $script:DeviceEventSubscriptions += Register-WmiEvent -Query $removeQuery -Action $removeAction -ErrorAction Stop
-
-        # Disk drive events
-        $diskInsertQuery = "SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_DiskDrive'"
+        # USB disk drive insertion (storage devices only)
+        $diskInsertQuery = "SELECT * FROM __InstanceCreationEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_DiskDrive'"
         $diskInsertAction = {
             $disk = $Event.SourceEventArgs.NewEvent.TargetInstance
+            # Only log USB storage devices
             if ($disk.InterfaceType -eq "USB") {
                 Write-DeviceEvent -EventType "DiskConnected" -Device $disk
             }
         }
         $script:DeviceEventSubscriptions += Register-WmiEvent -Query $diskInsertQuery -Action $diskInsertAction -ErrorAction Stop
 
-        Write-AuditLog -Category "RemovableMedia" -Message "Device event monitoring registered" -Severity "Information"
+        # USB disk drive removal
+        $diskRemoveQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_DiskDrive'"
+        $diskRemoveAction = {
+            $disk = $Event.SourceEventArgs.NewEvent.TargetInstance
+            if ($disk.InterfaceType -eq "USB") {
+                Write-DeviceEvent -EventType "DiskDisconnected" -Device $disk
+            }
+        }
+        $script:DeviceEventSubscriptions += Register-WmiEvent -Query $diskRemoveQuery -Action $diskRemoveAction -ErrorAction Stop
+
+        Write-AuditLog -Category "RemovableMedia" -Message "USB storage device monitoring registered" -Severity "Information"
 
     } catch {
         Write-AuditLog -Category "System" -Message "Failed to register device events: $_" -Severity "Error"
@@ -200,50 +202,79 @@ function Write-DeviceEvent {
 function Get-CurrentRemovableDevices {
     <#
     .SYNOPSIS
-        Gets all currently connected removable devices
+        Gets all currently connected USB STORAGE devices only
+        Filters out non-storage USB devices (keyboards, mice, etc.)
     #>
     [CmdletBinding()]
     param()
 
+    $config = Get-AuditConfig
     $devices = @()
 
-    # Get USB storage devices
+    # Get minimum size filter from config (default 1MB)
+    $minSizeBytes = 1MB
+    if ($config.RemovableMedia.MinimumDeviceSizeMB) {
+        $minSizeBytes = $config.RemovableMedia.MinimumDeviceSizeMB * 1MB
+    }
+
+    # Get USB storage devices only (actual disk drives)
     try {
         $usbDisks = Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction SilentlyContinue |
-            Where-Object { $_.InterfaceType -eq "USB" }
+            Where-Object {
+                $_.InterfaceType -eq "USB" -and
+                $_.MediaType -and
+                # Filter out card readers without media and devices below minimum size
+                $_.Size -ge $minSizeBytes
+            }
 
         foreach ($disk in $usbDisks) {
             $devices += [PSCustomObject]@{
                 DeviceID = $disk.DeviceID
                 Name = $disk.Caption
-                Type = "USB Disk"
+                Type = "USB Storage"
                 Size = $disk.Size
                 SizeGB = [math]::Round($disk.Size / 1GB, 2)
                 SerialNumber = $disk.SerialNumber
                 InterfaceType = $disk.InterfaceType
                 Manufacturer = $disk.Manufacturer
                 Model = $disk.Model
+                MediaType = $disk.MediaType
             }
         }
     } catch {
         Write-AuditLog -Category "System" -Message "Error enumerating USB disks: $_" -Severity "Warning"
     }
 
-    # Get logical drives that are removable
+    # Get removable logical drives with media present
     try {
         $removableDrives = Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction SilentlyContinue |
-            Where-Object { $_.DriveType -eq 2 }  # DriveType 2 = Removable
+            Where-Object {
+                $_.DriveType -eq 2 -and       # DriveType 2 = Removable
+                $_.Size -ge $minSizeBytes     # Has media inserted and meets minimum size
+            }
 
         foreach ($drive in $removableDrives) {
-            $devices += [PSCustomObject]@{
-                DeviceID = $drive.DeviceID
-                Name = "$($drive.DeviceID) ($($drive.VolumeName))"
-                Type = "Removable Drive"
-                Size = $drive.Size
-                SizeGB = if ($drive.Size) { [math]::Round($drive.Size / 1GB, 2) } else { 0 }
-                FreeSpace = $drive.FreeSpace
-                FileSystem = $drive.FileSystem
-                VolumeSerialNumber = $drive.VolumeSerialNumber
+            # Check if this drive letter is already associated with a USB disk we found
+            $alreadyListed = $false
+            foreach ($usbDisk in $devices) {
+                if ($usbDisk.DeviceID -and $drive.DeviceID) {
+                    # Skip duplicate entries
+                    $alreadyListed = $true
+                    break
+                }
+            }
+
+            if (-not $alreadyListed) {
+                $devices += [PSCustomObject]@{
+                    DeviceID = $drive.DeviceID
+                    Name = "$($drive.DeviceID) ($($drive.VolumeName))"
+                    Type = "Removable Drive"
+                    Size = $drive.Size
+                    SizeGB = [math]::Round($drive.Size / 1GB, 2)
+                    FreeSpace = $drive.FreeSpace
+                    FileSystem = $drive.FileSystem
+                    VolumeSerialNumber = $drive.VolumeSerialNumber
+                }
             }
         }
     } catch {
@@ -285,7 +316,8 @@ function Check-DeviceChanges {
 function Get-RemovableMediaEvents {
     <#
     .SYNOPSIS
-        Gets removable media events from Windows Event Log
+        Gets removable storage events from Windows Security Event Log
+        Focuses on event 6416 (external device recognized) for DCSA compliance
     #>
     [CmdletBinding()]
     param(
@@ -298,28 +330,8 @@ function Get-RemovableMediaEvents {
 
     $events = @()
 
-    # Microsoft-Windows-DriverFrameworks-UserMode operational log
-    # Event ID 2003 = Device connected
-    # Event ID 2102 = Device removed
-    try {
-        $driverEvents = Get-WinEvent -FilterHashtable @{
-            LogName = 'Microsoft-Windows-DriverFrameworks-UserMode/Operational'
-            StartTime = $StartTime
-            EndTime = $EndTime
-        } -ErrorAction SilentlyContinue
-
-        foreach ($event in $driverEvents) {
-            $events += [PSCustomObject]@{
-                TimeCreated = $event.TimeCreated
-                EventId = $event.Id
-                Message = $event.Message
-                Source = "DriverFrameworks"
-            }
-        }
-    } catch { }
-
-    # Security log - Removable storage events
-    # Event ID 6416 = New external device recognized
+    # Security log - Event ID 6416 = New external device recognized
+    # This is the primary event for DCSA removable media auditing
     try {
         $securityEvents = Get-WinEvent -FilterHashtable @{
             LogName = 'Security'
@@ -332,13 +344,27 @@ function Get-RemovableMediaEvents {
             $eventXml = [xml]$event.ToXml()
             $deviceId = ($eventXml.Event.EventData.Data | Where-Object { $_.Name -eq 'DeviceId' }).'#text'
             $deviceDesc = ($eventXml.Event.EventData.Data | Where-Object { $_.Name -eq 'DeviceDescription' }).'#text'
+            $className = ($eventXml.Event.EventData.Data | Where-Object { $_.Name -eq 'ClassName' }).'#text'
 
-            $events += [PSCustomObject]@{
-                TimeCreated = $event.TimeCreated
-                EventId = $event.Id
-                DeviceId = $deviceId
-                DeviceDescription = $deviceDesc
-                Source = "Security"
+            # Only include storage-related device classes
+            $storageClasses = @("DiskDrive", "CDROM", "FloppyDisk", "USB", "USBSTOR", "WPD")
+            $isStorage = $false
+            foreach ($sc in $storageClasses) {
+                if ($className -match $sc -or $deviceId -match $sc -or $deviceDesc -match "storage|disk|drive|mass storage") {
+                    $isStorage = $true
+                    break
+                }
+            }
+
+            if ($isStorage) {
+                $events += [PSCustomObject]@{
+                    TimeCreated = $event.TimeCreated
+                    EventId = $event.Id
+                    DeviceId = $deviceId
+                    DeviceDescription = $deviceDesc
+                    ClassName = $className
+                    Source = "Security"
+                }
             }
         }
     } catch { }

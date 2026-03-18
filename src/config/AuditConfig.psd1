@@ -143,12 +143,12 @@
         )
     }
 
-    # USB/Removable Media Monitoring
+    # USB/Removable Media Monitoring (Storage Devices Only)
     RemovableMedia = @{
         # Enable removable media monitoring
         Enabled = $true
 
-        # Log device connections
+        # Log device connections (storage devices only)
         LogDeviceConnections = $true
 
         # Log file transfers to/from removable media
@@ -157,8 +157,14 @@
         # Alert on unauthorized devices
         AlertOnUnauthorized = $true
 
-        # List of authorized device IDs (empty = log all)
+        # List of authorized device serial numbers or IDs (empty = log all)
         AuthorizedDevices = @()
+
+        # Minimum device size in MB to log (filters out card readers without media)
+        MinimumDeviceSizeMB = 1
+
+        # Device polling interval in seconds (higher = less resource usage)
+        PollIntervalSeconds = 30
     }
 
     # Process Execution Monitoring
